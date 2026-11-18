@@ -1,0 +1,244 @@
+<title>Менің қалама қош келдің</title>
+<style>
+/*FONTS*/
+/* Layout: full-bleed stage (photo or WebGL), one text column on the left over a neutral scrim, telemetry line as the signature, quiet HUD on the bottom edge. Single dark look by design. */
+:root {
+  --bg: #07080d;
+  --text: #eef0f5;
+  --text-2: #a3a9b8;
+  --muted: #7a8296;
+  --hair: rgba(238, 240, 245, .1);
+  --accent: #e3b072;
+  --tape: #f2c21b;
+  --tape-ink: #14120c;
+  --surface: #141824;
+  --f-sans: "IBM Plex Sans", "Segoe UI", system-ui, sans-serif;
+  --f-mono: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--f-sans); font-weight: 400; overflow: hidden; -webkit-font-smoothing: antialiased; }
+#stage { position: fixed; inset: 0; overflow: hidden; background: var(--bg); }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#photo { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }
+#photo img { position: absolute; inset: 0; width: 100%; height: 100%; max-width: none; object-fit: cover; object-position: 50% 45%; transform-origin: 50% 30%; transition: transform 2.4s var(--ease), filter 2.4s ease; will-change: transform, filter; }
+#scrim { position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .8s var(--ease);
+  background: linear-gradient(90deg, rgba(7,8,13,.9) 0%, rgba(7,8,13,.74) 34%, rgba(7,8,13,0) 64%), linear-gradient(0deg, rgba(7,8,13,.6) 0%, rgba(7,8,13,0) 24%); }
+#scrim.on { opacity: 1; }
+#flash { position: absolute; inset: 0; pointer-events: none; opacity: 0; background: #000; }
+
+/* text column */
+#slides { position: absolute; inset: 0; pointer-events: none; }
+.slide { position: absolute; left: max(64px, 6vw); top: 50%; transform: translateY(-50%); width: min(600px, 44vw); display: flex; flex-direction: column; gap: 40px; visibility: hidden; }
+.slide.on { visibility: visible; }
+.slide > * { opacity: 0; transform: translateY(8px); transition: opacity .5s var(--ease), transform .5s var(--ease); }
+.slide.on > * { opacity: 1; transform: none; }
+.slide.on > *:nth-child(2) { transition-delay: .06s; }
+.slide.on > *:nth-child(3) { transition-delay: .12s; }
+.slide.on > *:nth-child(4) { transition-delay: .18s; }
+.head { display: flex; flex-direction: column; gap: 12px; }
+.body { display: flex; flex-direction: column; gap: 24px; }
+.seq { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; color: var(--accent); }
+h1, h2 { margin: 0; font-weight: 300; line-height: 1.02; letter-spacing: -0.03em; text-wrap: balance; }
+h1 { font-size: clamp(72px, 9vw, 144px); }
+h2 { font-size: clamp(56px, 7vw, 112px); }
+h2.long { font-size: clamp(44px, 5vw, 80px); }
+.tele { margin: 0; font-family: var(--f-mono); font-size: 14px; line-height: 20px; color: var(--muted); font-variant-numeric: tabular-nums; display: flex; flex-wrap: wrap; column-gap: 12px; row-gap: 4px; }
+.tele span + span::before { content: "·"; margin-right: 12px; color: var(--muted); opacity: .6; }
+.lead { margin: 0; font-size: clamp(18px, 1.5vw, 22px); line-height: 1.5; color: var(--text); max-width: 30em; text-wrap: pretty; }
+.facts { margin: 0; display: flex; flex-direction: column; gap: 16px; }
+.facts div { display: grid; grid-template-columns: 136px 1fr; column-gap: 24px; }
+.facts dt { font-size: 15px; line-height: 24px; color: var(--muted); }
+.facts dd { margin: 0; font-size: clamp(16px, 1.25vw, 19px); line-height: 24px; color: var(--text-2); min-width: 0; text-wrap: pretty; }
+.pick { margin: 0; padding-left: 20px; border-left: 1px solid var(--accent); font-size: clamp(18px, 1.5vw, 22px); line-height: 1.5; color: var(--text); max-width: 30em; }
+
+/* the secret route */
+.route { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; border-top: 1px solid var(--hair); }
+.route li { display: grid; grid-template-columns: 40px 1fr; align-items: center; column-gap: 16px; height: 64px; border-bottom: 1px solid var(--hair); }
+.route .num { font-family: var(--f-mono); font-size: 14px; color: var(--muted); }
+.route .meta { font-family: var(--f-mono); font-size: 13px; color: var(--muted); }
+.taped { position: relative; }
+.route .cell { position: relative; display: block; height: 36px; }
+.route .real { position: absolute; left: 12px; top: 0; line-height: 36px; font-size: 22px; color: var(--text); opacity: 0; white-space: nowrap; }
+.tape { position: absolute; left: -12px; right: -64px; top: 0; height: 36px; display: block; background: var(--tape); color: var(--tape-ink); transform: rotate(var(--r, -1.5deg)); box-shadow: 0 4px 12px rgba(0, 0, 0, .5); overflow: hidden; }
+.tape::before, .tape::after { content: ""; position: absolute; left: 0; right: 0; height: 4px; background: repeating-linear-gradient(90deg, var(--tape-ink) 0 20px, transparent 20px 32px); }
+.tape::before { top: 3px; }
+.tape::after { bottom: 3px; }
+.tape .txt { position: absolute; inset: 0; display: flex; align-items: center; padding-left: 16px; white-space: nowrap; font-size: 15px; font-weight: 600; letter-spacing: .06em; }
+.tape.stripes { background: repeating-linear-gradient(-45deg, var(--tape-ink) 0 16px, var(--tape) 16px 32px); }
+.tape.stripes::before, .tape.stripes::after { display: none; }
+.tape.big { left: -40px; right: -280px; height: 40px; }
+.tape.big.stripes { top: -16%; }
+.tape.big:not(.stripes) { top: 104%; }
+.slide.glitching .tape { animation: flick .1s steps(2) infinite; }
+.slide.glitching .real { animation: leak .09s steps(2) infinite; }
+.slide.glitching > * { animation: tear .1s steps(2) infinite; }
+@keyframes tear {
+  0% { transform: translateX(0); clip-path: inset(0 0 0 0); text-shadow: 2px 0 rgba(255, 70, 70, .7), -2px 0 rgba(70, 200, 255, .7); }
+  50% { transform: translateX(-8px); clip-path: inset(18% 0 34% 0); }
+  100% { transform: translateX(6px); clip-path: inset(58% 0 6% 0); }
+}
+@keyframes flick { 0% { opacity: 1; } 100% { opacity: .15; } }
+@keyframes leak { 0% { opacity: 0; } 100% { opacity: 1; } }
+
+.slide.center { left: 50%; transform: translate(-50%, -50%); width: min(960px, 88vw); align-items: center; text-align: center; }
+
+#place { position: absolute; right: max(48px, 4vw); bottom: 96px; font-family: var(--f-mono); font-size: 13px; line-height: 20px; color: rgba(238, 240, 245, .8); text-align: right; opacity: 0; transition: opacity .6s var(--ease); pointer-events: none; text-shadow: 0 1px 8px rgba(0, 0, 0, .6); }
+#place.on { opacity: 1; }
+#caption { position: absolute; left: 0; right: 0; bottom: 18vh; text-align: center; font-weight: 300; font-size: clamp(28px, 3vw, 48px); letter-spacing: -0.02em; opacity: 0; transition: opacity .6s var(--ease); pointer-events: none; padding-inline: 24px; text-shadow: 0 2px 24px rgba(0, 0, 0, .8); }
+#caption.on { opacity: 1; }
+
+/* HUD */
+#hud { position: absolute; left: 0; right: 0; bottom: 0; height: 72px; padding-inline: max(64px, 6vw) max(48px, 4vw); display: flex; align-items: center; gap: 12px; font-size: 15px; color: var(--text-2); }
+#count { font-family: var(--f-mono); font-size: 15px; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 56px; }
+#bar { flex: 1; height: 1px; background: var(--hair); position: relative; overflow: hidden; margin-right: 12px; }
+#bar i { position: absolute; inset: 0; background: var(--text-2); transform-origin: left; transform: scaleX(0); transition: transform .6s var(--ease); }
+#hud button { display: inline-flex; align-items: center; gap: 10px; height: 40px; padding: 0 18px 0 10px; background: var(--surface); border: 1px solid rgba(238, 240, 245, .14); border-radius: 20px; box-shadow: inset 0 1px 0 rgba(255, 255, 255, .06); color: var(--text); font: inherit; font-size: 15px; cursor: pointer; transition: background-color .15s var(--ease), border-color .15s var(--ease); }
+#hud button:hover { background: #1c2130; border-color: rgba(238, 240, 245, .24); }
+#hud button:active { transform: scale(.97); }
+#hud button[aria-pressed="false"].toggle .lbl { color: var(--muted); }
+#hud button:focus-visible { outline: 2px solid var(--text-2); outline-offset: 2px; }
+kbd { display: inline-grid; place-items: center; min-width: 24px; height: 24px; padding: 0 6px; box-sizing: border-box; border-radius: 12px; background: rgba(238, 240, 245, .08); font-family: var(--f-mono); font-size: 12px; color: var(--text-2); }
+
+#notes { position: absolute; left: 50%; bottom: 84px; transform: translateX(-50%); width: min(880px, calc(100vw - 32px)); max-height: 44vh; overflow: auto; background: rgba(11, 13, 20, .94); border: 1px solid var(--hair); border-radius: 14px; padding: 20px 24px; box-sizing: border-box; font-size: 17px; line-height: 1.6; color: var(--text); }
+#notes h3 { margin: 0 0 8px; font-size: 13px; font-weight: 500; color: var(--muted); }
+
+#loader { position: absolute; inset: 0; display: grid; place-items: center; background: var(--bg); z-index: 5; transition: opacity .8s var(--ease); font-family: var(--f-mono); font-size: 13px; color: var(--muted); }
+#loader.err { font-family: var(--f-sans); font-size: 17px; color: var(--text); padding: 0 24px; text-align: center; }
+
+@media (max-width: 760px) {
+  .slide { top: auto; bottom: 72px; transform: none; left: 16px; right: 16px; width: auto; gap: 24px; }
+  .slide.center { left: 16px; transform: none; width: auto; }
+  .facts div { grid-template-columns: 1fr; row-gap: 4px; }
+  #scrim { background: linear-gradient(0deg, rgba(7,8,13,.94) 0%, rgba(7,8,13,.72) 50%, rgba(7,8,13,0) 82%); }
+  #place, #hud .opt { display: none; }
+  #hud { padding-inline: 16px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .slide > * { transition: opacity .3s ease; transform: none; }
+}
+</style>
+
+<div id="stage">
+  <canvas id="gl" aria-hidden="true"></canvas>
+  <div id="photo"><img id="photoImg" alt="ҚБТУ ғимараты, Алматы, Төле би көшесі"></div>
+  <div id="scrim"></div>
+
+  <main id="slides">
+    <section class="slide" data-notes="Сәлем, досым! Қаламызға қош келдің! Бұл — Алматы. Алматы — Қазақстанның ең үлкен қаласы. Ол елдің оңтүстігінде, таудың етегінде орналасқан. Бұл — өте әдемі, жасыл қала. Мына ғимаратты көрдің бе? Бұл — менің университетім, ҚБТУ. Ол қала орталығында, Төле би көшесінде орналасқан.">
+      <div class="head">
+        <p class="seq">Қаламызға қош келдің</p>
+        <h1>Алматы</h1>
+        <p class="tele"><span>43°16′ N</span><span>76°54′ E</span><span>Жер</span></p>
+      </div>
+      <div class="body">
+        <p class="lead">Қазақстанның ең үлкен қаласы. Ол елдің оңтүстігінде, таудың етегінде орналасқан.</p>
+        <dl class="facts">
+          <div><dt>Суретте</dt><dd>Менің университетім, ҚБТУ. Қала орталығында, Төле би көшесінде.</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Бүгін саған ең жақсы жерлерді көрсетемін. Мен саған үш жерді ұсынамын. Қайда барамыз? Әзірге құпия. Бір ғана нәрсе айтайын: бұл жерлерде сен ешқашан болған жоқсың. Дайынсың ба? Онда кеттік!">
+      <div class="head">
+        <p class="seq">Бүгінгі маршрут</p>
+        <h2 class="long">Саған үш жерді көрсетемін</h2>
+      </div>
+      <div class="body">
+        <p class="lead">Қайда барамыз — әзірге құпия.</p>
+        <div class="taped">
+          <ol class="route">
+            <li><span class="num">1</span><span class="cell"><span class="real">Сатурн</span><span class="tape" style="--r:-2.2deg"><span class="txt">TOP SECRET&ensp;■&ensp;TOP SECRET&ensp;■&ensp;TOP SECRET&ensp;■&ensp;TOP SECRET&ensp;■&ensp;TOP SECRET</span></span></span></li>
+            <li><span class="num">2</span><span class="cell"><span class="real">Нептун</span><span class="tape" style="--r:1.4deg"><span class="txt">DO NOT CROSS&ensp;■&ensp;DO NOT CROSS&ensp;■&ensp;DO NOT CROSS&ensp;■&ensp;DO NOT CROSS</span></span></span></li>
+            <li><span class="num">3</span><span class="cell"><span class="real">Қара құрдым</span><span class="tape" style="--r:-1deg"><span class="txt">DANGER&ensp;■&ensp;DANGER&ensp;■&ensp;DANGER&ensp;■&ensp;DANGER&ensp;■&ensp;DANGER&ensp;■&ensp;DANGER</span></span></span></li>
+          </ol>
+          <span class="tape stripes big" style="--r:-9deg" aria-hidden="true"></span>
+          <span class="tape big" style="--r:6deg" aria-hidden="true"><span class="txt">CLASSIFIED&ensp;■&ensp;CLASSIFIED&ensp;■&ensp;CLASSIFIED&ensp;■&ensp;CLASSIFIED&ensp;■&ensp;CLASSIFIED&ensp;■&ensp;CLASSIFIED</span></span>
+        </div>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Алдымен біз Сатурнға келдік! Сатурн — Күн жүйесіндегі алтыншы планета. Мұнда үлкен, әдемі сақиналар бар. Оларды тамашалауға және суретке түсуге болады. Маған бұл жер ұнайды, өйткені бұл — Күн жүйесіндегі ең әдемі планета. Менің кеңесім: жылы киім ки, өйткені мұнда минус жүз қырық градус. Билет қымбат, бірақ көрінісі керемет. Сатурнға зымыранмен жеті жыл ұшу керек. Енді келесі жерге барайық!">
+      <div class="head">
+        <p class="seq">Алдымен</p>
+        <h2>Сатурн</h2>
+        <p class="tele"><span>Күннен 1,4 млрд км</span><span>−140 °C</span><span>зымыранмен 7 жыл</span></p>
+      </div>
+      <div class="body">
+        <p class="lead">Күн жүйесіндегі алтыншы планета. Мұнда үлкен сақиналар бар, оларды тамашалауға және суретке түсуге болады.</p>
+        <dl class="facts">
+          <div><dt>Неге ұнайды</dt><dd>Бұл — Күн жүйесіндегі ең әдемі планета</dd></div>
+          <div><dt>Кеңес</dt><dd>Жылы киім ки. Билет қымбат, бірақ көрінісі керемет</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Содан кейін біз Нептунға барамыз. Нептун Күн жүйесінің шетінде орналасқан. Ол — сегізінші планета. Ол көк түсті. Мұнда өте қатты жел соғады — сағатына екі мың шақырым. Маған бұл жер ұнайды, өйткені оның түсі мұхит сияқты көк. Менің кеңесім: қалың куртка ки! Мұнда Сатурннан да суық — минус екі жүз он төрт градус. Нептунға зымыранмен он екі жыл ұшу керек. Енді келесі жерге барайық. Бірақ... бұл не?">
+      <div class="head">
+        <p class="seq">Содан кейін</p>
+        <h2>Нептун</h2>
+        <p class="tele"><span>Күннен 4,5 млрд км</span><span>−214 °C</span><span>зымыранмен 12 жыл</span></p>
+      </div>
+      <div class="body">
+        <p class="lead">Күн жүйесінің шетіндегі сегізінші планета. Ол көк түсті, мұнда сағатына 2000 км жел соғады.</p>
+        <dl class="facts">
+          <div><dt>Неге ұнайды</dt><dd>Оның түсі мұхит сияқты көк</dd></div>
+          <div><dt>Кеңес</dt><dd>Қалың куртка ки, мұнда Сатурннан да суық</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Тоқта! Бәрі тартылып жатыр! ... Осыдан кейін біз қара құрдымға келдік. Ол біздің галактиканың ортасында орналасқан. Мұнда жарық та шыға алмайды. Мұнда уақыт баяу жүреді. Маған бұл жер ұнайды, өйткені ол — ғарыштағы ең жұмбақ жер. Менің кеңесім: тым жақын барма! Алыстан қараған дұрыс. Мұнда жарық жылдамдығымен жиырма алты мың жыл ұшу керек.">
+      <div class="head">
+        <p class="seq">Осыдан кейін</p>
+        <h2>Қара құрдым</h2>
+        <p class="tele"><span>Sgr A*</span><span>4 млн Күн массасы</span><span>26 000 жарық жылы</span></p>
+      </div>
+      <div class="body">
+        <p class="lead">Біздің галактиканың ортасында орналасқан. Мұнда жарық та шыға алмайды, ал уақыт баяу жүреді.</p>
+        <dl class="facts">
+          <div><dt>Неге ұнайды</dt><dd>Бұл — ғарыштағы ең жұмбақ жер</dd></div>
+          <div><dt>Кеңес</dt><dd>Тым жақын барма. Алыстан қараған дұрыс</dd></div>
+        </dl>
+      </div>
+    </section>
+
+    <section class="slide" data-notes="Соңында... біз үйге, Алматыға оралдық! Қорытынды: бүгін біз Сатурнды, Нептунды және қара құрдымды көрдік. Үшеуі де өте қызық жерлер. Бірақ менің кеңесім — Сатурнға бар! Оның сақиналарын көрсең, саған міндетті түрде ұнайды.">
+      <div class="head">
+        <p class="seq">Соңында</p>
+        <h2>Үйге оралдық</h2>
+        <p class="tele"><span>43°16′ N</span><span>76°54′ E</span><span>Жер</span></p>
+      </div>
+      <div class="body">
+        <p class="lead">Бүгін біз Сатурнды, Нептунды және қара құрдымды көрдік.</p>
+        <p class="pick">Менің кеңесім — Сатурнға бар. Оның сақиналарын көрсең, саған міндетті түрде ұнайды.</p>
+      </div>
+    </section>
+
+    <section class="slide center" data-notes="Назарларыңызға рақмет! Сұрақтарыңыз бар ма?">
+      <div class="head">
+        <h1>Рақмет</h1>
+      </div>
+      <p class="lead">Назарларыңызға рақмет. Сұрақтарыңыз бар ма?</p>
+    </section>
+  </main>
+
+  <div id="place">ҚБТУ · Төле би көшесі, 59<br>Алматы</div>
+  <div id="caption">Тоқта. Бәрі тартылып жатыр</div>
+  <div id="flash"></div>
+
+  <nav id="hud" aria-label="Слайдтар">
+    <span id="count">1 / 7</span>
+    <div id="bar"><i></i></div>
+    <button id="btnNotes" type="button" class="opt" aria-pressed="false"><kbd>N</kbd><span>Notes</span></button>
+    <button id="btnSound" type="button" class="opt toggle" aria-pressed="true"><kbd>M</kbd><span class="lbl">Sound</span></button>
+    <button id="btnFs" type="button" class="opt"><kbd>F</kbd><span>Fullscreen</span></button>
+  </nav>
+  <aside id="notes" hidden><h3>Айтатын мәтін</h3><div id="notesBody"></div></aside>
+
+  <div id="loader"><div id="loaderText">Жүктелуде</div></div>
+</div>
+
+<script id="assets" type="application/json">/*ASSETS*/</script>
+<script>/*BUNDLE*/</script>
