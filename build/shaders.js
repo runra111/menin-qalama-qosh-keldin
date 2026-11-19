@@ -73,13 +73,23 @@ void main(){
 export const ringFrag = /* glsl */`
 uniform sampler2D ringTex; uniform vec3 sunDir; uniform vec3 center; uniform vec3 ringN;
 uniform float radius; uniform float rIn; uniform float rOut; uniform float opacity; uniform float sunPower;
-uniform vec3 tint;
+uniform vec3 tint; uniform float uTime;
 varying vec3 vW; varying vec3 vL;
+float rh(vec3 p){ p = fract(p * 0.3183099 + 0.1); p *= 17.0; return fract(p.x * p.y * p.z * (p.x + p.y + p.z)); }
+float rn(vec3 x){
+  vec3 i = floor(x); vec3 f = fract(x); f = f * f * (3.0 - 2.0 * f);
+  return mix(mix(mix(rh(i), rh(i + vec3(1,0,0)), f.x), mix(rh(i + vec3(0,1,0)), rh(i + vec3(1,1,0)), f.x), f.y),
+             mix(mix(rh(i + vec3(0,0,1)), rh(i + vec3(1,0,1)), f.x), mix(rh(i + vec3(0,1,1)), rh(i + vec3(1,1,1)), f.x), f.y), f.z);
+}
 void main(){
   float r = length(vL.xz);
   if (r < rIn || r > rOut) discard;
   vec4 t = texture2D(ringTex, vec2(0.5, (r - rIn) / (rOut - rIn)));
-  float a = pow(t.a, 1.25) * opacity;
+  float ang = atan(vL.z, vL.x);
+  float a2 = ang - uTime * 0.7 / pow(r, 1.5);
+  float clump = 0.6 * rn(vec3(cos(a2) * 9.0, sin(a2) * 9.0, r * 60.0)) + 0.4 * rn(vec3(cos(a2) * 26.0, sin(a2) * 26.0, r * 150.0));
+  float cm = 0.72 + 0.56 * clump;
+  float a = clamp(pow(t.a, 1.25) * opacity * cm, 0.0, 1.0);
   vec3 V = normalize(cameraPosition - vW);
   float sl = dot(sunDir, ringN);
   float vl = dot(V, ringN);
@@ -90,7 +100,7 @@ void main(){
   float b = dot(oc, sunDir);
   float d = length(oc - sunDir * b);
   float sh = b < 0.0 ? smoothstep(radius * 0.96, radius * 1.01, d) : 1.0;
-  vec3 col = t.rgb * tint * (lit + scatter) * sh * sunPower * (0.55 + 0.45 * abs(sl));
+  vec3 col = t.rgb * tint * (lit + scatter) * sh * sunPower * (0.55 + 0.45 * abs(sl)) * (0.85 + 0.3 * clump);
   gl_FragColor = vec4(col * a, a);
 }`;
 
@@ -167,8 +177,8 @@ vec3 blackbody(float T){
 
 vec4 disk(vec3 hp, float r, vec3 dir){
   float ang = atan(hp.z, hp.x);
-  float w = 0.9 / pow(r, 1.5);
-  float a2 = ang + uTime * w;
+  float w = 0.55 * (0.5 + 0.5 * pow(DIN / r, 1.5));
+  float a2 = ang - uTime * w;
   vec3 q = vec3(cos(a2) * 1.6, sin(a2) * 1.6, r * 1.9);
   float n = fbm(q * 1.3);
   float n2 = fbm(vec3(cos(a2) * 6.0, sin(a2) * 6.0, r * 9.0));

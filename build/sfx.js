@@ -87,22 +87,28 @@ export class Sfx {
     s.start(t); s.stop(t + 1.5);
   }
 
-  // digital breakup: short square blips and hiss bursts
+  // soft digital glitch: muted triangle bleeps on a pentatonic scale, a little echo, and a tape-stop at the end
   glitch(dur = 0.8) {
     if (!this.ctx) return;
-    const c = this.ctx, b = this.bus(1, 0.08);
-    for (let x = 0; x < dur; x += 0.025 + Math.random() * 0.05) {
-      const t = this.t + x, o = c.createOscillator(), g = c.createGain(), len = 0.012 + Math.random() * 0.04;
-      o.type = 'square'; o.frequency.value = 90 + Math.random() * 2600;
-      g.gain.setValueAtTime(0.07 + Math.random() * 0.06, t); g.gain.setValueAtTime(0.0001, t + len);
-      o.connect(g).connect(b); o.start(t); o.stop(t + len + 0.01);
-      if (Math.random() < 0.4) {
-        const s = this.src(), hp = c.createBiquadFilter(), ng = c.createGain();
-        hp.type = 'highpass'; hp.frequency.value = 1500 + Math.random() * 4000;
-        ng.gain.setValueAtTime(0.08, t); ng.gain.setValueAtTime(0.0001, t + len * 1.5);
-        s.connect(hp).connect(ng).connect(b); s.start(t); s.stop(t + len * 1.5 + 0.01);
-      }
+    const c = this.ctx, t0 = this.t;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 2600; lp.Q.value = 0.5;
+    const b = this.bus(0.9, 0.45);
+    lp.connect(b);
+    const notes = [523.25, 622.25, 698.46, 783.99, 932.33, 1046.5, 1244.5];
+    let x = 0;
+    while (x < dur) {
+      const t = t0 + x, o = c.createOscillator(), g = c.createGain();
+      o.type = 'triangle';
+      o.frequency.value = notes[Math.floor(Math.random() * notes.length)] * (Math.random() < 0.3 ? 0.5 : 1);
+      this.env(g.gain, t, 0.004, 0.05 + Math.random() * 0.025, 0.02, 0.07);
+      o.connect(g).connect(lp); o.start(t); o.stop(t + 0.12);
+      x += 0.05 + Math.random() * 0.06;
     }
+    const o = c.createOscillator(), g = c.createGain();
+    o.type = 'sine';
+    o.frequency.setValueAtTime(440, t0); o.frequency.exponentialRampToValueAtTime(70, t0 + dur);
+    this.env(g.gain, t0, 0.05, 0.035, dur * 0.6, dur * 0.4);
+    o.connect(g).connect(lp); o.start(t0); o.stop(t0 + dur + 0.1);
   }
 
   // rising engine tone for the ascent

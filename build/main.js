@@ -8,6 +8,7 @@ import * as SH from './shaders.js';
 import { Sfx } from './sfx.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import * as SkeletonUtils from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 
 const $ = (s) => document.querySelector(s);
 const V = (x, y, z) => new THREE.Vector3(x, y, z);
@@ -22,6 +23,8 @@ const ease = {
 };
 const wait = (s) => new Promise((r) => setTimeout(r, s * 1000));
 const sfx = new Sfx();
+/* global __BHS__ */
+const BHS = typeof __BHS__ === 'undefined' ? true : __BHS__;
 
 const ASSETS = JSON.parse($('#assets').textContent);
 function b64buf(s) { const bin = atob(s); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u.buffer; }
@@ -149,7 +152,7 @@ function makePlanet({ geo, map, ringTex, R, center, parent = space, tilt, atmo, 
     const ring = new THREE.Mesh(rg, new THREE.ShaderMaterial({
       uniforms: {
         ringTex: { value: ringTex }, sunDir: { value: SUN }, center: { value: center }, ringN: { value: ringN }, radius: { value: R },
-        rIn: { value: rIn }, rOut: { value: rOut }, opacity: { value: ringOpacity }, sunPower: { value: 2.4 }, tint: { value: ringTint },
+        rIn: { value: rIn }, rOut: { value: rOut }, opacity: { value: ringOpacity }, sunPower: { value: 2.4 }, tint: { value: ringTint }, uTime: { value: 0 },
       },
       vertexShader: SH.ringVert, fragmentShader: SH.ringFrag, transparent: true, depthWrite: false, side: THREE.DoubleSide,
       blending: THREE.CustomBlending, blendSrc: THREE.OneFactor, blendDst: THREE.OneMinusSrcAlphaFactor,
@@ -157,6 +160,7 @@ function makePlanet({ geo, map, ringTex, R, center, parent = space, tilt, atmo, 
     ring.scale.setScalar(R);
     ring.renderOrder = 2;
     group.add(ring);
+    updaters.push((t) => { ring.material.uniforms.uTime.value = t; });
   }
   updaters.push((t) => { body.rotation.y = t * spin; });
   return group;
@@ -372,12 +376,12 @@ photoMesh.frustumCulled = false; photoMesh.renderOrder = 1000; photoMesh.visible
 space.add(photoMesh);
 
 // ---------- characters: astronaut, pig, Bart ----------
-const gltfLoader = new GLTFLoader();
+const gltfLoader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const mixers = [];
 function parseGLB(name) { return new Promise((res, rej) => gltfLoader.parse(b64buf(ASSETS[name]), '', res, rej)); }
 function instance(gltf, height, anchor = 'mid') {
   const root = SkeletonUtils.clone(gltf.scene);
-  root.traverse((o) => { if (o.isMesh) o.frustumCulled = false; });
+  root.traverse((o) => { if (o.isMesh) { o.frustumCulled = false; for (const m of [].concat(o.material)) m.side = THREE.DoubleSide; } });
   root.updateMatrixWorld(true);
   root.traverse((o) => { if (o.isSkinnedMesh) { o.skeleton.update(); o.computeBoundingBox(); } });
   const box = new THREE.Box3().setFromObject(root);
@@ -465,10 +469,10 @@ async function neptuneVisitors() {
   const alive = () => gen === flybyGen && cur === 3;
   await wait(2.5);
   while (alive()) {
-    if (!busy) { sfx.whoosh(2.2, 300, 2400, 0.25); flyby(pig, 6, 10, 0.05, -0.12, 1.4); }
+    if (!busy) { flyby(pig, 6, 10, 0.05, -0.12, 1.4); }
     await wait(7);
     if (!alive()) break;
-    if (!busy) { sfx.whoosh(2.2, 250, 2000, 0.25); flyby(bart, 7.5, 9, -0.2, 0.12, -0.8); }
+    if (!busy) { flyby(bart, 7.5, 9, -0.2, 0.12, -0.8); }
     await wait(11);
   }
 }
@@ -498,9 +502,9 @@ function shadowBlob(r) {
   return m;
 }
 function beatPhase() {
-  const p = sfx.party;
-  if (p && sfx.ctx) return (sfx.t - p.t0) / (p.step * 2);
-  return performance.now() / 1000 * 118 / 60;
+  const tr = music.tracks.egg;
+  if (tr && sfx.ctx) return (sfx.ctx.currentTime - tr.t0 - 0.19) * 80 / 60;
+  return performance.now() / 1000 * 80 / 60;
 }
 function bounce(k) {
   const n = 7.5625, d = 2.75;
@@ -538,8 +542,63 @@ function startEgg() {
   const idle = pigE.find('idle');
   if (idle) idle.reset().play();
   setMode('egg');
-  sfx.partyOn();
 }
+
+// ---------- music: three songs on their own gains, under the master volume ----------
+const music = {
+  raw: {}, buf: {}, tracks: {}, decoding: null,
+  async load() {
+    for (const n of BHS ? ['bg', 'bh', 'egg'] : ['bg', 'egg']) {
+      if (ASSETS['music_' + n]) this.raw[n] = b64buf(ASSETS['music_' + n]);
+      else this.raw[n] = await fetch(`music/${n}.mp3`).then((r) => (r.ok ? r.arrayBuffer() : null)).catch(() => null);
+    }
+  },
+  decode() {
+    if (this.decoding || !sfx.ctx) return this.decoding;
+    this.decoding = (async () => {
+      for (const n of Object.keys(this.raw)) {
+        if (!this.raw[n] || this.buf[n]) continue;
+        try { this.buf[n] = await sfx.ctx.decodeAudioData(this.raw[n].slice(0)); } catch (e) { /* skip a broken file */ }
+      }
+      this.sync(cur, 2);
+    })();
+    return this.decoding;
+  },
+  play(n, { offset = 0, vol = 0.2, fade = 2, loop = true } = {}) {
+    if (!sfx.ctx || !this.buf[n]) return false;
+    this.stop(n, 0.05);
+    const c = sfx.ctx, g = c.createGain(), src = c.createBufferSource();
+    g.gain.value = 0.0001;
+    src.buffer = this.buf[n]; src.loop = loop;
+    src.connect(g).connect(sfx.out);
+    src.start(0, offset % this.buf[n].duration);
+    g.gain.setTargetAtTime(Math.max(vol, 0.0001), c.currentTime, fade / 3);
+    this.tracks[n] = { src, g, t0: c.currentTime - offset };
+    return true;
+  },
+  ramp(n, vol, dur) {
+    const tr = this.tracks[n]; if (!tr) return;
+    const t = sfx.ctx.currentTime;
+    tr.g.gain.cancelScheduledValues(t);
+    tr.g.gain.setValueAtTime(Math.max(tr.g.gain.value, 0.0001), t);
+    tr.g.gain.linearRampToValueAtTime(Math.max(vol, 0.0001), t + dur);
+  },
+  stop(n, fade = 1.5) {
+    const tr = this.tracks[n]; if (!tr) return;
+    delete this.tracks[n];
+    const t = sfx.ctx.currentTime;
+    tr.g.gain.cancelScheduledValues(t);
+    tr.g.gain.setTargetAtTime(0.0001, t, fade / 3);
+    tr.src.stop(t + fade * 2 + 0.05);
+  },
+  // what should be playing on each slide, for jumps and for when decoding finishes late
+  sync(i, fade = 1.5) {
+    if (!sfx.ctx) return;
+    const want = { 2: ['bg', 0.085], 3: ['bg', 0.085], 4: BHS ? ['bh', 0.15] : ['bg', 0.085], 5: ['bg', 0.07], 6: ['bg', 0.07], 7: ['egg', 0.46] }[i];
+    for (const n of Object.keys(this.tracks)) if (!want || want[0] !== n) this.stop(n, fade);
+    if (want && !this.tracks[want[0]]) this.play(want[0], { vol: want[1], fade, offset: want[0] === 'bh' ? 7.6 : 0 });
+  },
+};
 
 // ---------- modes ----------
 let mode = 'space';
@@ -623,11 +682,11 @@ function photo(state, dur = 2.4, opDur = 1.2, opDelay = 0, fromTf = null) {
   photoOpaque = s.op === 1;
 }
 function showPanel(i) { slides.forEach((s, j) => { s.classList.toggle('on', j === i); s.classList.remove('glitching'); }); }
-function hidePanels() { slides.forEach((s) => s.classList.remove('on')); }
+function hidePanels() { slides.forEach((s) => s.classList.remove('on', 'slow')); }
 function setFlash(color, op, dur) { flash.style.background = color; flash.style.transition = `opacity ${dur}s ease`; flash.style.opacity = op; }
 function ambience(i) {
   if (i !== 7) sfx.partyOff();
-  if (i >= 2 && i <= 4) sfx.droneOn(i === 4 ? 0.035 : 0.06); else sfx.droneOff();
+  if (i >= 2 && i <= 4) sfx.droneOn(i === 4 ? 0.025 : 0.035); else sfx.droneOff();
   if (i === 4) { sfx.rumbleOn(); sfx.rumbleLevel(0.12, 1); } else sfx.rumbleOff();
 }
 
@@ -665,6 +724,7 @@ function applyState(i) {
   if (shot) { const s = shot(performance.now() / 1000); setCam(s.pos, s.tgt); }
   if (i === 2) astroPass();
   ambience(i);
+  music.sync(i);
   showPanel(i);
 }
 
@@ -696,6 +756,8 @@ async function forward(i) {
     await wait(0.12);
     hidePanels(); place.classList.remove('on'); scrim.classList.remove('on');
     photo('hidden', 0.01, 0.01);
+    music.stop('bg', 0.3);
+    music.play('egg', { vol: 0.46, fade: 0.15 });
     startEgg();
     setFlash('#fff', 0, 0.5);
     return;
@@ -727,8 +789,7 @@ async function launch() {
   hidePanels(); scrim.classList.remove('on');
   fx.uniforms.uGlitch.value = 0;
   // impact
-  sfx.boom(1);
-  sfx.riser(3.2);
+  sfx.boom(0.55);
   fx.uniforms.uFadeCol.value.set(1, 1, 1);
   tween(0.7, (k) => { fx.uniforms.uFade.value = 1 - k; }, ease.out);
   shake = 0.02;
@@ -749,14 +810,13 @@ async function launch() {
   photoOpaque = false;
   shake = 0;
   fx.uniforms.uZoom.value = 0;
-  sfx.droneOn(0.05);
+  sfx.droneOn(0.035);
+  music.play('bg', { vol: 0.085, fade: 5 });
   await wait(1.2);
-  sfx.whoosh(7, 100, 3200, 0.5, 0.4);
   astro.find('float').reset().play();
   await flyTo(shots.saturn(), 7.5, [GAL.c.clone().add(V(1600, 4200, 7400)), V(700, 900, 2600), V(80, 40, 300)], {
     zoom: 0.9, ez: ease.inOutSine,
   });
-  sfx.thud();
   astroPass();
   scrim.classList.add('on');
   showPanel(2);
@@ -770,20 +830,28 @@ async function blackHoleForms() {
   const u = lensMat.uniforms;
   u.uRs.value = 0; u.uDisk.value = 0;
   sfx.rumbleOn();
-  let roared = false, captioned = false, swung = null;
-  await tween(9.0, (k) => {
-    u.uRs.value = RS * Math.pow(smooth(0.0, 0.42, k), 1.4);
-    const e = ease.in(smooth(0.16, 0.66, k));
+  if (BHS) music.stop('bg', 2.5);
+  // the song starts on the line before the chorus; the hole appears on "Black hole sun" (~6 s in)
+  if (music.play('bh', { offset: 2.15, vol: 0.3, fade: 0.15, loop: false })) music.ramp('bh', 0.66, 6);
+  let roared = false, swung = null;
+  const DUR = BHS ? 13 : 9;
+  const S = BHS ? 1 : 0; // shift of the song-timed cues
+  await tween(DUR, (k) => {
+    let T = k * DUR;
+    // 0-6 s: tension, the stars only start to bend; 6-8 s: the shadow opens
+    u.uRs.value = S ? RS * (0.015 * smooth(0.5, 6.0, T) + 0.985 * Math.pow(smooth(5.8, 8.0, T), 1.4)) : RS * Math.pow(smooth(0.0, 2.7, T), 1.4);
+    if (!S) T += 5.16; // the rest of the timeline runs 5.16 s earlier without the song
+    const e = ease.in(smooth(6.6, 10.8, T));
     const p = placeNeptune(e);
-    debris.set(smooth(0.22, 0.86, k), p);
-    u.uDisk.value = smooth(0.5, 0.72, k);
-    shake = 0.006 * smooth(0.08, 0.5, k) * (1 - smooth(0.62, 0.85, k)) + 0.012 * smooth(0.5, 0.56, k) * (1 - smooth(0.56, 0.7, k));
-    sfx.rumbleLevel(0.08 + 0.75 * smooth(0.05, 0.55, k) - 0.55 * smooth(0.7, 1, k));
-    if (!captioned && k > 0.1) { captioned = true; caption.classList.add('on'); }
-    if (captioned && k > 0.48) caption.classList.remove('on');
-    if (!roared && k > 0.52) { roared = true; sfx.roar(); bloom.strength = 1.15; }
-    if (roared) bloom.strength = THREE.MathUtils.lerp(1.15, 0.85, smooth(0.52, 0.8, k));
-    if (!swung && k > 0.62) {
+    debris.set(smooth(7.0, 12.2, T), p);
+    u.uDisk.value = smooth(9.2, 11.0, T);
+    shake = 0.003 * S * smooth(0.5, 6.0, T) * (1 - smooth(6.0, 7.0, T))
+      + 0.006 * smooth(6.0, 7.5, T) * (1 - smooth(10.0, 12.0, T))
+      + 0.012 * smooth(9.6, 10.0, T) * (1 - smooth(10.0, 11.4, T));
+    sfx.rumbleLevel(0.06 + 0.75 * smooth(0.5, 8.0, T) - 0.55 * smooth(10.5, 13.0, T));
+    if (!roared && T > 9.6) { roared = true; sfx.roar(); bloom.strength = 1.15; }
+    if (roared) bloom.strength = THREE.MathUtils.lerp(1.15, 0.85, smooth(9.6, 12.0, T));
+    if (!swung && T > 11.0) {
       const d = 26 * RS, el = 0.115;
       const pt = (az, dd, e2) => V(Math.sin(az) * Math.cos(e2), Math.sin(e2), Math.cos(az) * Math.cos(e2)).multiplyScalar(dd).add(BH);
       const az0 = Math.atan2(camera.position.x - BH.x, camera.position.z - BH.z);
@@ -795,14 +863,18 @@ async function blackHoleForms() {
   shake = 0;
   debris.set(1, BH);
   cubeDirty = 2;
+  await wait(3);
+  slides[4].classList.add('slow');
   scrim.classList.add('on');
   showPanel(4);
+  music.ramp('bh', 0.15, 4);
 }
 
 // fall through the horizon and come out at home
 async function fallIn() {
   hidePanels(); scrim.classList.remove('on');
   flying = true;
+  music.stop('bh', 3);
   sfx.rumbleLevel(0.5, 1.5);
   sfx.sink(4.4);
   const p0 = camera.position.clone().sub(BH), t0 = curTgt.clone();
@@ -826,6 +898,7 @@ async function fallIn() {
   photo('home', 3.0, 0.01, 0, 'scale(1.3)');
   setMode('space');
   setFlash('#fff', 0, 1.6);
+  if (!music.tracks.bg) music.play('bg', { vol: 0.07, fade: 4 }); else music.ramp('bg', 0.07, 3);
   place.classList.add('on');
   await wait(0.9);
   scrim.classList.add('on');
@@ -852,7 +925,7 @@ async function go(i) {
 }
 
 // ---------- input ----------
-function unlockAudio() { if (sfx.ensure()) ambience(cur); }
+function unlockAudio() { if (sfx.ensure()) { ambience(cur); music.decode(); } }
 addEventListener('keydown', (e) => {
   if (e.altKey || e.ctrlKey || e.metaKey) return;
   const k = e.key;
@@ -977,7 +1050,7 @@ async function init() {
 
   const satGroup = makePlanet({
     geo: planetGeometry(b64buf(ASSETS.saturn)), map: satMap, ringTex: satRing, R: SAT.R, center: SAT.c, tilt: V(0.35, 0.92, 0.12),
-    atmo: V(0.42, 0.34, 0.22).multiplyScalar(0.18), rIn: 1.2341, rOut: 2.3985, spin: 0.012, limbK: 0.5, haloEdge: 0.12, haloScale: 1.02,
+    atmo: V(0.42, 0.34, 0.22).multiplyScalar(0.18), rIn: 1.2341, rOut: 2.3985, spin: 0.05, limbK: 0.5, haloEdge: 0.12, haloScale: 1.02,
   });
   makeMoon(encMap, 0.09, satGroup, SAT.R, 3.95 * SAT.R, 2.25);
   makeMoon(mimMap, 0.07, satGroup, SAT.R, 3.08 * SAT.R, -2.5);
@@ -987,10 +1060,11 @@ async function init() {
   nepCenter = NEP.c.clone();
   makePlanet({
     geo: planetGeometry(b64buf(ASSETS.neptune)), map: nepMap, ringTex: nepRing, R: NEP.R, center: nepCenter, parent: nepHolder, tilt: V(0.05, 0.9, 0.35),
-    atmo: V(0.25, 0.45, 1.0).multiplyScalar(0.55), rIn: 1.6743, rOut: 2.4331, ringOpacity: 0.32, ringTint: V(0.55, 0.62, 0.78), spin: 0.02, limbK: 0.55, haloEdge: 0.3, haloScale: 1.05,
+    atmo: V(0.25, 0.45, 1.0).multiplyScalar(0.55), rIn: 1.6743, rOut: 2.4331, ringOpacity: 0.32, ringTint: V(0.55, 0.62, 0.78), spin: 0.07, limbK: 0.55, haloEdge: 0.3, haloScale: 1.05,
   });
   placeNeptune(0);
 
+  music.load();
   const [gAstro, gPig, gBart] = await Promise.all([parseGLB('astronaut'), parseGLB('pig'), parseGLB('bart')]);
   astro = instance(gAstro, 1.8); astro.holder.visible = false; space.add(astro.holder);
   pig = instance(gPig, 1.4); pig.holder.visible = false; space.add(pig.holder);
@@ -1021,7 +1095,7 @@ async function init() {
   setTimeout(() => L.remove(), 900);
   const start = Number((location.hash.match(/^#s(\d)$/) || [])[1] || 0);
   cur = start; hud(); applyState(start);
-  window.__deck = { go, get cur() { return cur; }, get busy() { return busy; }, fx, lensMat, camera, sfx, chars: () => ({ astro, pig, bart, bartE, pigE }), THREE };
+  window.__deck = { music, go, get cur() { return cur; }, get busy() { return busy; }, fx, lensMat, camera, sfx, chars: () => ({ astro, pig, bart, bartE, pigE }), THREE };
 }
 init().catch((e) => {
   console.error(e);

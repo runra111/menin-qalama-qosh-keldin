@@ -16,6 +16,7 @@
     "@fontsource/inter": "^5.1.0",
     "@fontsource/unbounded": "^5.1.0",
     "esbuild": "^0.24.0",
+    "gltfpack": "^0.22.0",
     "three": "^0.170.0"
   }
 }
