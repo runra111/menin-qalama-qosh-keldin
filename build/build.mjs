@@ -8,7 +8,6 @@ const here = path.dirname(fileURLToPath(import.meta.url));
 const A = path.join(here, '..', 'assets');
 const bundle = async (bhs) => (await build({ entryPoints: [path.join(here, 'main.js')], bundle: true, minify: true, format: 'iife', write: false, target: 'es2020', legalComments: 'none', define: { __BHS__: String(bhs) } })).outputFiles[0].text.replace(/<\/script/gi, '<\\/script');
 const js = await bundle(true);
-const jsGit = await bundle(false);
 
 const b64 = (f) => fs.readFileSync(path.join(A, f)).toString('base64');
 const assets = {
@@ -66,15 +65,15 @@ const local = tpl
   .replace('/*ASSETS*/', () => JSON.stringify({ ...assets, ...music }))
   .replace('/*BUNDLE*/', () => js);
 fs.writeFileSync(path.join(here, '..', 'Презентация.html'), head + local + '\n</html>\n');
-// GitHub build: no Black Hole Sun; Deftones and the dance song as files in music/
+// GitHub build: same page as the web build, songs as files in music/
 const gh = path.join(here, '..', 'github');
 fs.mkdirSync(path.join(gh, 'music'), { recursive: true });
 const ghPage = tpl
   .replace('/*FONTS*/', () => fonts)
   .replace('/*CREDIT*/', () => '')
   .replace('/*ASSETS*/', () => JSON.stringify(assets))
-  .replace('/*BUNDLE*/', () => jsGit);
+  .replace('/*BUNDLE*/', () => js);
 fs.writeFileSync(path.join(gh, 'index.html'), head + ghPage + '\n</html>\n');
-for (const n of ['bg', 'egg']) fs.copyFileSync(path.join(A, 'music', n + '.mp3'), path.join(gh, 'music', n + '.mp3'));
+for (const n of ['bg', 'bh', 'egg']) if (hasSong(n)) fs.copyFileSync(path.join(A, 'music', n + '.mp3'), path.join(gh, 'music', n + '.mp3'));
 console.log('ok github', (ghPage.length / 1e6).toFixed(2), 'MB');
 console.log('ok web', (page.length / 1e6).toFixed(2), 'MB, local', (local.length / 1e6).toFixed(2), 'MB');

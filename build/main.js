@@ -566,7 +566,7 @@ const music = {
   },
   play(n, { offset = 0, vol = 0.2, fade = 2, loop = true } = {}) {
     if (!sfx.ctx || !this.buf[n]) return false;
-    this.stop(n, 0.05);
+    if (this.tracks[n]) { this.ramp(n, vol, fade); return true; }
     const c = sfx.ctx, g = c.createGain(), src = c.createBufferSource();
     g.gain.value = 0.0001;
     src.buffer = this.buf[n]; src.loop = loop;
@@ -594,9 +594,9 @@ const music = {
   // what should be playing on each slide, for jumps and for when decoding finishes late
   sync(i, fade = 1.5) {
     if (!sfx.ctx) return;
-    const want = { 2: ['bg', 0.085], 3: ['bg', 0.085], 4: BHS ? ['bh', 0.15] : ['bg', 0.085], 5: ['bg', 0.07], 6: ['bg', 0.07], 7: ['egg', 0.46] }[i];
+    const want = { 2: ['bg', 0.085], 3: BHS ? ['bh', 0.16] : ['bg', 0.085], 4: BHS ? ['bh', 0.15] : ['bg', 0.085], 5: ['bg', 0.07], 6: ['bg', 0.07], 7: ['egg', 0.46] }[i];
     for (const n of Object.keys(this.tracks)) if (!want || want[0] !== n) this.stop(n, fade);
-    if (want && !this.tracks[want[0]]) this.play(want[0], { vol: want[1], fade, offset: want[0] === 'bh' ? 7.6 : 0 });
+    if (want && !this.tracks[want[0]]) this.play(want[0], { vol: want[1], fade, offset: want[0] === 'bh' ? (i === 4 ? 60 : 0) : 0 });
   },
 };
 
@@ -617,11 +617,11 @@ function setMode(m) {
   applyQuality();
 }
 function applyQuality() {
-  const pr = mode === 'lens' ? DPR * quality * 0.85 : DPR;
+  const pr = DPR;
   composer.setPixelRatio(pr);
   composer.setSize(innerWidth, innerHeight);
   const w = Math.floor(innerWidth * pr), h = Math.floor(innerHeight * pr);
-  sceneRT.setSize(w, h);
+  sceneRT.setSize(Math.floor(innerWidth * DPR), Math.floor(innerHeight * DPR));
   lensMat.uniforms.uRes.value.set(w, h);
   fx.uniforms.uRes.value.set(w, h);
 }
@@ -740,6 +740,7 @@ async function forward(i) {
   if (i === 3) {
     hidePanels(); scrim.classList.remove('on');
     astroState.mode = 'world';
+    if (BHS) { music.stop('bg', 3); music.play('bh', { offset: 0, vol: 0.16, fade: 2.5, loop: false }); }
     sfx.whoosh(6.5, 140, 2600, 0.4);
     await flyTo(shots.neptune(), 7, [SAT.c.clone().add(V(40, 22, 150)), V(-420, 260, -900), NEP.c.clone().add(V(160, 40, 220))], { zoom: 0.75 });
     sfx.thud();
@@ -811,12 +812,12 @@ async function launch() {
   shake = 0;
   fx.uniforms.uZoom.value = 0;
   sfx.droneOn(0.035);
-  music.play('bg', { vol: 0.085, fade: 5 });
   await wait(1.2);
   astro.find('float').reset().play();
   await flyTo(shots.saturn(), 7.5, [GAL.c.clone().add(V(1600, 4200, 7400)), V(700, 900, 2600), V(80, 40, 300)], {
     zoom: 0.9, ez: ease.inOutSine,
   });
+  music.play('bg', { vol: 0.085, fade: 3 });
   astroPass();
   scrim.classList.add('on');
   showPanel(2);
@@ -830,12 +831,11 @@ async function blackHoleForms() {
   const u = lensMat.uniforms;
   u.uRs.value = 0; u.uDisk.value = 0;
   sfx.rumbleOn();
-  if (BHS) music.stop('bg', 2.5);
-  // the song starts on the line before the chorus; the hole appears on "Black hole sun" (~6 s in)
-  if (music.play('bh', { offset: 2.15, vol: 0.3, fade: 0.15, loop: false })) music.ramp('bh', 0.66, 6);
-  let roared = false, swung = null;
-  const DUR = BHS ? 13 : 9;
-  const S = BHS ? 1 : 0; // shift of the song-timed cues
+  // the song is already playing from the Neptune slide; the hole opens right on the press
+  if (BHS && !music.tracks.bh) music.play('bh', { offset: 53.6, vol: 0.16, fade: 0.3, loop: false });
+  let roared = false, swung = null, textShown = false;
+  const DUR = 9;
+  const S = 0;
   await tween(DUR, (k) => {
     let T = k * DUR;
     // 0-6 s: tension, the stars only start to bend; 6-8 s: the shadow opens
@@ -863,11 +863,7 @@ async function blackHoleForms() {
   shake = 0;
   debris.set(1, BH);
   cubeDirty = 2;
-  await wait(3);
-  slides[4].classList.add('slow');
-  scrim.classList.add('on');
-  showPanel(4);
-  music.ramp('bh', 0.15, 4);
+  if (!textShown) { slides[4].classList.add('slow'); scrim.classList.add('on'); showPanel(4); }
 }
 
 // fall through the horizon and come out at home
@@ -1010,7 +1006,7 @@ function frame() {
   camera.updateMatrixWorld();
   if (mode === 'lens') {
     // live view of the scene for the lens: the frame itself plus a cube for light bent in from off-screen
-    if (lensMat.uniforms.uMirror.value < 0.5 && (busy ? frameNo % 3 === 0 : cubeDirty > 0)) { renderCube(); if (cubeDirty > 0) cubeDirty--; }
+    if (lensMat.uniforms.uMirror.value < 0.5 && (busy ? frameNo % 12 === 0 : cubeDirty > 0)) { renderCube(); if (cubeDirty > 0) cubeDirty--; }
     renderer.setRenderTarget(sceneRT);
     renderer.clear();
     renderer.render(space, camera);
@@ -1022,12 +1018,6 @@ function frame() {
     L.uFov.value = THREE.MathUtils.degToRad(camera.fov);
     vp.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     L.uViewProj.value.copy(vp);
-    frameTimes.push(dtMs);
-    if (frameTimes.length > 40) {
-      const avg = frameTimes.reduce((a, b) => a + b, 0) / frameTimes.length;
-      frameTimes = [];
-      if (avg > 30 && quality > 0.5) { quality = Math.max(0.5, quality - 0.15); applyQuality(); }
-    }
   }
   composer.render();
 }
